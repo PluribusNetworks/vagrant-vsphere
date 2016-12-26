@@ -55,6 +55,7 @@ module VagrantPlugins
 
             env[:ui].info "Setting custom memmory reservation: #{config.mem_reservation}" unless config.mem_reservation.nil?
             add_custom_mem_reservation(spec, config.mem_reservation) unless config.mem_reservation.nil?
+            add_custom_network(spec, config.template_name, config.mgmt_network, config.fabric_network) unless config.mgmt_network.nil?
             add_custom_extra_config(spec, config.extra_config) unless config.extra_config.empty?
             add_custom_notes(spec, config.notes) unless config.notes.nil?
 
@@ -281,6 +282,31 @@ module VagrantPlugins
 
         def add_custom_mem_reservation(spec, mem_reservation)
           spec[:config][:memoryAllocation] = RbVmomi::VIM.ResourceAllocationInfo(reservation: mem_reservation)
+        end
+
+       def create_network_device(label, summary, index)
+         key = 4000 + index
+          config_spec_operation = RbVmomi::VIM::VirtualDeviceConfigSpecOperation('edit')
+          nic_backing_info = RbVmomi::VIM::VirtualEthernetCardNetworkBackingInfo(:deviceName => summary)
+          connectable = RbVmomi::VIM::VirtualDeviceConnectInfo(
+            :allowGuestControl => true,
+            :connected => true,
+            :startConnected => true)
+          device = RbVmomi::VIM::VirtualVmxnet3(
+            :backing => nic_backing_info,
+            :deviceInfo => RbVmomi::VIM::Description(:label => label, :summary => summary),
+            :key => key,
+            :connectable => connectable)
+          device_spec = RbVmomi::VIM::VirtualDeviceConfigSpec(
+            :operation => config_spec_operation,
+            :device => device)
+         return device_spec
+       end
+
+        def add_custom_network(spec, vm_template, mgmt_net, fab_net)
+         device_mgmt_spec = create_network_device("Network adapter 1", mgmt_net, 0)
+         device_fab_spec = create_network_device("Network adapter 2", fab_net, 1)
+          spec[:config][:deviceChange] = [device_mgmt_spec, device_fab_spec]
         end
 
         def add_custom_extra_config(spec, extra_config = {})
