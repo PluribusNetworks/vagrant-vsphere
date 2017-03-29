@@ -55,7 +55,7 @@ module VagrantPlugins
 
             env[:ui].info "Setting custom memmory reservation: #{config.mem_reservation}" unless config.mem_reservation.nil?
             add_custom_mem_reservation(spec, config.mem_reservation) unless config.mem_reservation.nil?
-            add_custom_network(spec, config.template_name, config.mgmt_network, config.fabric_network) unless config.mgmt_network.nil?
+            add_custom_network(spec, config.template_name, config.mgmt_network, config.fabric_network, config.data_network) unless config.mgmt_network.nil?
             add_custom_extra_config(spec, config.extra_config) unless config.extra_config.empty?
             add_custom_notes(spec, config.notes) unless config.notes.nil?
 
@@ -303,10 +303,15 @@ module VagrantPlugins
          return device_spec
        end
 
-        def add_custom_network(spec, vm_template, mgmt_net, fab_net)
-         device_mgmt_spec = create_network_device("Network adapter 1", mgmt_net, 0)
-         device_fab_spec = create_network_device("Network adapter 2", fab_net, 1)
-          spec[:config][:deviceChange] = [device_mgmt_spec, device_fab_spec]
+        def add_custom_network(spec, vm_template, mgmt_net, fab_net, data_net)
+          device_mgmt_spec = create_network_device("Network adapter 1", mgmt_net, 0)
+          device_fab_spec = create_network_device("Network adapter 2", fab_net, 1)
+	  if data_net.nil?
+            spec[:config][:deviceChange] = [device_mgmt_spec, device_fab_spec]
+          else
+          device_data_spec = create_network_device("Network adapter 3", data_net, 2)
+            spec[:config][:deviceChange] = [device_mgmt_spec, device_fab_spec, device_data_spec]
+	  end
         end
 
         def add_custom_extra_config(spec, extra_config = {})
