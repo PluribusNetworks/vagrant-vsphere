@@ -42,7 +42,7 @@ module VagrantPlugins
             add_custom_mac(template, spec, config.mac) unless config.mac.nil?
 
             env[:ui].info "Setting custom vlan: #{config.vlan}" unless config.vlan.nil?
-            add_custom_vlan(template, dc, spec, config.vlan) unless config.vlan.nil?
+            add_custom_vlan(template, dc, connection, spec, config.vlan) unless config.vlan.nil?
 
             env[:ui].info "Setting custom memory: #{config.memory_mb}" unless config.memory_mb.nil?
             add_custom_memory(spec, config.memory_mb) unless config.memory_mb.nil?
@@ -53,9 +53,13 @@ module VagrantPlugins
             env[:ui].info "Setting custom cpu reservation: #{config.cpu_reservation}" unless config.cpu_reservation.nil?
             add_custom_cpu_reservation(spec, config.cpu_reservation) unless config.cpu_reservation.nil?
 
-            env[:ui].info "Setting custom memmory reservation: #{config.mem_reservation}" unless config.mem_reservation.nil?
+            env[:ui].info "Setting custom memory reservation: #{config.mem_reservation}" unless config.mem_reservation.nil?
             add_custom_mem_reservation(spec, config.mem_reservation) unless config.mem_reservation.nil?
-            add_custom_network(spec, config.template_name, config.mgmt_network, config.fabric_network, config.data_network) unless config.mgmt_network.nil?
+
+            env[:ui].info "Setting custom control network: #{config.control_network}" unless config.control_network.nil?
+            env[:ui].info "Setting custom mgmt network: #{config.mgmt_network}" unless config.mgmt_network.nil?
+            add_custom_network(dc, spec, config.template_name, config.control_network, config.mgmt_network) unless config.control_network.nil?
+
             add_custom_extra_config(spec, config.extra_config) unless config.extra_config.empty?
             add_custom_notes(spec, config.notes) unless config.notes.nil?
 
@@ -254,14 +258,21 @@ module VagrantPlugins
           end
         end
 
-        def add_custom_vlan(template, dc, spec, vlan)
-          network = get_network_by_name(dc, vlan)
-
+        def add_custom_vlan(template, dc, connection, spec, vlan)
           modify_network_card(template, spec) do |card|
             begin
+	      robj = connection.serviceContent.viewManager.
+	        CreateContainerView({
+	  			     :container => dc.networkFolder,
+				     :type => ["vim.dvs.DistributedVirtualPortgroup"],
+				     :recursive => true
+				   }).view
+	  
+	      network = robj.find { |x| x.name == vlan }
               switch_port = RbVmomi::VIM.DistributedVirtualSwitchPortConnection(switchUuid: network.config.distributedVirtualSwitch.uuid, portgroupKey: network.key)
               card.backing = RbVmomi::VIM::VirtualEthernetCardDistributedVirtualPortBackingInfo(port: switch_port)
             rescue
+              network = get_network_by_name(dc, vlan)
               # not connected to a distibuted switch?
               card.backing = RbVmomi::VIM::VirtualEthernetCardNetworkBackingInfo(network: network, deviceName: network.name)
             end
@@ -284,10 +295,21 @@ module VagrantPlugins
           spec[:config][:memoryAllocation] = RbVmomi::VIM.ResourceAllocationInfo(reservation: mem_reservation)
         end
 
-       def create_network_device(label, summary, index)
-         key = 4000 + index
+       def create_network_device(dc, label, summary, index)
           config_spec_operation = RbVmomi::VIM::VirtualDeviceConfigSpecOperation('edit')
-          nic_backing_info = RbVmomi::VIM::VirtualEthernetCardNetworkBackingInfo(:deviceName => summary)
+          network = get_network_by_name(dc, summary)
+	  key = 4000 + index
+	  if ( network.kind_of? RbVmomi::VIM::DistributedVirtualPortgroup)
+	    # Create the NIC backing for the distributed virtual portgroup
+	    nic_backing_info = RbVmomi::VIM::VirtualEthernetCardDistributedVirtualPortBackingInfo(
+		:port => RbVmomi::VIM::DistributedVirtualSwitchPortConnection(
+									      :portgroupKey => network.key,
+									      :switchUuid => network.config.distributedVirtualSwitch.uuid,
+									     ))
+	  else
+	    # Otherwise it's a non distributed port group
+	    nic_backing_info = RbVmomi::VIM::VirtualEthernetCardNetworkBackingInfo(:deviceName => summary)
+	  end
           connectable = RbVmomi::VIM::VirtualDeviceConnectInfo(
             :allowGuestControl => true,
             :connected => true,
@@ -303,15 +325,10 @@ module VagrantPlugins
          return device_spec
        end
 
-        def add_custom_network(spec, vm_template, mgmt_net, fab_net, data_net)
-          device_mgmt_spec = create_network_device("Network adapter 1", mgmt_net, 0)
-          device_fab_spec = create_network_device("Network adapter 2", fab_net, 1)
-	  if data_net.nil?
-            spec[:config][:deviceChange] = [device_mgmt_spec, device_fab_spec]
-          else
-          device_data_spec = create_network_device("Network adapter 3", data_net, 2)
-            spec[:config][:deviceChange] = [device_mgmt_spec, device_fab_spec, device_data_spec]
-	  end
+        def add_custom_network(dc, spec, vm_template, mgmt_net, fab_net)
+         device_mgmt_spec = create_network_device(dc, "Network adapter 1", mgmt_net, 0)
+         device_fab_spec = create_network_device(dc, "Network adapter 2", fab_net, 1)
+          spec[:config][:deviceChange] = [device_mgmt_spec, device_fab_spec]
         end
 
         def add_custom_extra_config(spec, extra_config = {})
