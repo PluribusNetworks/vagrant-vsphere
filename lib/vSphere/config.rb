@@ -29,9 +29,8 @@ module VagrantPlugins
       attr_accessor :mem_reservation
       attr_accessor :extra_config
       attr_accessor :real_nic_ip
+      attr_accessor :control_network
       attr_accessor :mgmt_network
-      attr_accessor :fabric_network
-      attr_accessor :data_network
       attr_accessor :notes
 
       attr_reader :custom_attributes
